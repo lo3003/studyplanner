@@ -13,7 +13,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { toast } from "sonner";
-import { CalendarPlus, Trash2 } from "lucide-react";
+import { CalendarPlus, Trash2, Clock, Plus } from "lucide-react";
 import { usePlannerStore } from "@/store/plannerStore";
 import type { FixedEvent, CreateFixedEventInput } from "@/types";
 
@@ -97,21 +97,27 @@ export function FixedEventDialog({ event, onClose }: FixedEventDialogProps) {
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="gap-2">
-          <CalendarPlus className="h-4 w-4" />
+        <Button 
+          variant="outline" 
+          className="w-full gap-2 rounded-xl border-dashed border-2 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50 text-slate-600 hover:text-indigo-600 transition-all"
+        >
+          <Plus className="h-4 w-4" />
           Ajouter un événement fixe
         </Button>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-[425px] rounded-2xl">
         <DialogHeader>
-          <DialogTitle>
-            {isEditMode ? "Modifier l'événement" : "Ajouter un événement fixe"}
+          <DialogTitle className="flex items-center gap-2 text-slate-800">
+            <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+              <CalendarPlus className="h-4 w-4 text-indigo-600" />
+            </div>
+            {isEditMode ? "Modifier l'événement" : "Nouvel événement fixe"}
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="grid gap-4 py-4">
           {/* Title */}
           <div className="grid gap-2">
-            <Label htmlFor="fe-title">Nom de l&apos;événement</Label>
+            <Label htmlFor="fe-title" className="text-sm font-medium text-slate-700">Nom de l&apos;événement</Label>
             <Input
               id="fe-title"
               placeholder="Ex: Cours de Physique, RDV médecin..."
@@ -120,12 +126,13 @@ export function FixedEventDialog({ event, onClose }: FixedEventDialogProps) {
                 setFormData({ ...formData, title: e.target.value })
               }
               required
+              className="rounded-xl border-slate-200 focus:border-indigo-300 focus:ring-indigo-200"
             />
           </div>
 
           {/* Start Date */}
           <div className="grid gap-2">
-            <Label htmlFor="fe-start">Début</Label>
+            <Label htmlFor="fe-start" className="text-sm font-medium text-slate-700">Début</Label>
             <Input
               id="fe-start"
               type="datetime-local"
@@ -134,12 +141,13 @@ export function FixedEventDialog({ event, onClose }: FixedEventDialogProps) {
                 setFormData({ ...formData, startDate: e.target.value })
               }
               required
+              className="rounded-xl border-slate-200 focus:border-indigo-300 focus:ring-indigo-200"
             />
           </div>
 
           {/* End Date */}
           <div className="grid gap-2">
-            <Label htmlFor="fe-end">Fin</Label>
+            <Label htmlFor="fe-end" className="text-sm font-medium text-slate-700">Fin</Label>
             <Input
               id="fe-end"
               type="datetime-local"
@@ -148,12 +156,13 @@ export function FixedEventDialog({ event, onClose }: FixedEventDialogProps) {
                 setFormData({ ...formData, endDate: e.target.value })
               }
               required
+              className="rounded-xl border-slate-200 focus:border-indigo-300 focus:ring-indigo-200"
             />
           </div>
 
           {/* Description (optional) */}
           <div className="grid gap-2">
-            <Label htmlFor="fe-desc">Description (optionnel)</Label>
+            <Label htmlFor="fe-desc" className="text-sm font-medium text-slate-700">Description (optionnel)</Label>
             <Input
               id="fe-desc"
               placeholder="Notes supplémentaires..."
@@ -161,11 +170,16 @@ export function FixedEventDialog({ event, onClose }: FixedEventDialogProps) {
               onChange={(e) =>
                 setFormData({ ...formData, description: e.target.value })
               }
+              className="rounded-xl border-slate-200 focus:border-indigo-300 focus:ring-indigo-200"
             />
           </div>
 
-          <DialogFooter>
-            <Button type="submit" disabled={loading}>
+          <DialogFooter className="mt-2">
+            <Button 
+              type="submit" 
+              disabled={loading}
+              className="rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-md"
+            >
               {loading ? "Sauvegarde..." : isEditMode ? "Modifier" : "Ajouter"}
             </Button>
           </DialogFooter>
@@ -202,19 +216,22 @@ export function FixedEventItem({ event }: FixedEventItemProps) {
   };
 
   return (
-    <div className="flex items-center justify-between p-3 border rounded-lg bg-gray-50 hover:bg-gray-100 transition">
-      <div className="flex-1">
-        <h4 className="font-medium text-gray-800">{event.title}</h4>
-        <p className="text-xs text-gray-500">
-          {formatDisplayDate(event.start_at)} → {formatDisplayDate(event.end_at)}
-        </p>
+    <div className="flex items-center justify-between p-3 rounded-xl bg-slate-50 border border-slate-200 hover:border-slate-300 hover:shadow-sm transition-all group">
+      <div className="flex-1 min-w-0">
+        <h4 className="font-medium text-slate-800 truncate">{event.title}</h4>
+        <div className="flex items-center gap-1.5 mt-1">
+          <Clock className="w-3 h-3 text-slate-400" />
+          <p className="text-xs text-slate-500">
+            {formatDisplayDate(event.start_at)} → {formatDisplayDate(event.end_at)}
+          </p>
+        </div>
       </div>
       <Button
         variant="ghost"
         size="sm"
         onClick={handleDelete}
         disabled={deleting}
-        className="text-red-500 hover:text-red-700 hover:bg-red-50"
+        className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
       >
         <Trash2 className="h-4 w-4" />
       </Button>

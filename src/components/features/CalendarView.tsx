@@ -94,13 +94,13 @@ export function CalendarView({
         end: new Date(event.end_at),
         type: "fixed_event",
         resource: {
-          color: event.color || "#6b7280",
+          color: event.color || "#64748b",
           originalEvent: event,
         },
       });
     }
 
-    // Schedule Blocks - BLUE (with lock indicator if locked)
+    // Schedule Blocks - INDIGO (with lock indicator if locked)
     for (const block of scheduleBlocks) {
       allEvents.push({
         id: `block-${block.id}`,
@@ -109,7 +109,7 @@ export function CalendarView({
         end: new Date(block.end_at),
         type: "schedule_block",
         resource: {
-          color: block.color || "#3b82f6",
+          color: block.color || "#6366f1",
           originalEvent: block,
           isLocked: block.is_locked,
         },
@@ -125,29 +125,35 @@ export function CalendarView({
 
   const eventPropGetter = useCallback((event: CalendarEvent) => {
     const baseStyle: React.CSSProperties = {
-      backgroundColor: event.resource?.color || "#3b82f6",
-      borderRadius: "4px",
-      opacity: 0.9,
+      backgroundColor: event.resource?.color || "#6366f1",
+      borderRadius: "8px",
+      opacity: 1,
       color: "white",
       border: "none",
       display: "block",
+      fontSize: "12px",
+      fontWeight: 500,
+      padding: "2px 6px",
+      boxShadow: "0 1px 3px rgba(0,0,0,0.1)",
     };
 
-    // Add yellow border for locked blocks
+    // Add amber border for locked blocks
     if (event.type === "schedule_block" && event.resource?.isLocked) {
-      baseStyle.border = "2px solid #facc15";
-      baseStyle.boxShadow = "0 0 4px #facc15";
+      baseStyle.border = "2px solid #fbbf24";
+      baseStyle.boxShadow = "0 0 8px rgba(251, 191, 36, 0.4)";
     }
 
     // Deadlines are not draggable - make them look different
     if (event.type === "deadline") {
-      baseStyle.opacity = 0.7;
+      baseStyle.opacity = 0.85;
       baseStyle.cursor = "default";
+      baseStyle.backgroundColor = "#ef4444";
     }
 
     // Fixed events are not draggable
     if (event.type === "fixed_event") {
       baseStyle.cursor = "default";
+      baseStyle.backgroundColor = "#64748b";
     }
 
     return { style: baseStyle };
@@ -279,28 +285,36 @@ export function CalendarView({
   // ========================================
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col h-full">
       {/* Navigation Bar */}
-      <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-3 rounded-lg shadow-sm border">
-        {/* Date Picker */}
-        <div className="flex items-center gap-2">
-          <CalendarIcon className="h-4 w-4 text-gray-500" />
-          <Input
-            type="date"
-            value={format(currentDate, "yyyy-MM-dd")}
-            onChange={handleDateInputChange}
-            className="w-auto"
-          />
-          <Button variant="outline" size="sm" onClick={goToToday}>
+      <div className="flex flex-wrap items-center justify-between gap-4 p-4 border-b border-slate-100">
+        {/* Left: Date picker and Today button */}
+        <div className="flex items-center gap-3">
+          <div className="relative">
+            <CalendarIcon className="h-4 w-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+            <Input
+              type="date"
+              value={format(currentDate, "yyyy-MM-dd")}
+              onChange={handleDateInputChange}
+              className="w-auto pl-9 h-9 border-slate-200 focus:ring-indigo-500 rounded-xl text-sm"
+            />
+          </div>
+          <Button 
+            variant="outline" 
+            size="sm" 
+            onClick={goToToday}
+            className="rounded-xl border-slate-200 hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 text-sm font-medium"
+          >
             Aujourd&apos;hui
           </Button>
         </div>
 
-        {/* Week Navigation */}
-        <div className="flex items-center gap-2">
+        {/* Center: Navigation */}
+        <div className="flex items-center gap-1 bg-slate-100/80 rounded-xl p-1">
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon"
+            className="h-8 w-8 rounded-lg hover:bg-white hover:shadow-sm"
             onClick={() => {
               const newDate = new Date(currentDate);
               if (view === "week") newDate.setDate(newDate.getDate() - 7);
@@ -311,14 +325,15 @@ export function CalendarView({
           >
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-sm font-medium min-w-[150px] text-center">
+          <span className="text-sm font-semibold text-slate-700 min-w-[160px] text-center px-2">
             {view === "month" && format(currentDate, "MMMM yyyy", { locale: fr })}
             {view === "week" && `Semaine du ${format(startOfWeek(currentDate, { weekStartsOn: 1 }), "d MMM", { locale: fr })}`}
             {view === "day" && format(currentDate, "EEEE d MMMM", { locale: fr })}
           </span>
           <Button
-            variant="outline"
+            variant="ghost"
             size="icon"
+            className="h-8 w-8 rounded-lg hover:bg-white hover:shadow-sm"
             onClick={() => {
               const newDate = new Date(currentDate);
               if (view === "week") newDate.setDate(newDate.getDate() + 7);
@@ -331,55 +346,71 @@ export function CalendarView({
           </Button>
         </div>
 
-        {/* View Selector */}
-        <div className="flex items-center gap-1">
+        {/* Right: View Selector */}
+        <div className="flex items-center bg-slate-100/80 rounded-xl p-1">
           <Button
-            variant={view === "month" ? "default" : "outline"}
+            variant="ghost"
             size="sm"
             onClick={() => handleViewChange("month")}
+            className={`rounded-lg text-sm font-medium px-4 transition-all ${
+              view === "month" 
+                ? "bg-white shadow-sm text-indigo-600" 
+                : "text-slate-600 hover:text-slate-900"
+            }`}
           >
             Mois
           </Button>
           <Button
-            variant={view === "week" ? "default" : "outline"}
+            variant="ghost"
             size="sm"
             onClick={() => handleViewChange("week")}
+            className={`rounded-lg text-sm font-medium px-4 transition-all ${
+              view === "week" 
+                ? "bg-white shadow-sm text-indigo-600" 
+                : "text-slate-600 hover:text-slate-900"
+            }`}
           >
             Semaine
           </Button>
           <Button
-            variant={view === "day" ? "default" : "outline"}
+            variant="ghost"
             size="sm"
             onClick={() => handleViewChange("day")}
+            className={`rounded-lg text-sm font-medium px-4 transition-all ${
+              view === "day" 
+                ? "bg-white shadow-sm text-indigo-600" 
+                : "text-slate-600 hover:text-slate-900"
+            }`}
           >
             Jour
           </Button>
         </div>
       </div>
 
-      {/* Legend */}
-      <div className="flex flex-wrap gap-4 text-xs text-gray-600 bg-gray-50 p-3 rounded-lg">
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-red-500" />
-          <span>Deadlines</span>
+      {/* Legend Bar */}
+      <div className="flex items-center gap-6 px-4 py-2.5 bg-slate-50/50 border-b border-slate-100 text-xs">
+        <span className="text-slate-400 font-medium uppercase tracking-wide">Légende:</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-sm bg-red-500 shadow-sm" />
+          <span className="text-slate-600">Deadlines</span>
         </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-blue-500" />
-          <span>Blocs de travail</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-sm bg-indigo-500 shadow-sm" />
+          <span className="text-slate-600">Sessions de travail</span>
         </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-gray-500" />
-          <span>Événements fixes</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-sm bg-slate-500 shadow-sm" />
+          <span className="text-slate-600">Événements fixes</span>
         </div>
-        <div className="flex items-center gap-1">
-          <div className="w-3 h-3 rounded bg-blue-700 border-2 border-yellow-400" />
-          <Lock className="w-3 h-3" />
-          <span>Verrouillé</span>
+        <div className="flex items-center gap-1.5">
+          <div className="w-2.5 h-2.5 rounded-sm bg-indigo-700 ring-2 ring-amber-400 ring-offset-1" />
+          <Lock className="w-3 h-3 text-amber-500" />
+          <span className="text-slate-600">Verrouillé</span>
         </div>
       </div>
 
-      {/* Calendar */}
-      <div className="h-[600px] bg-white p-4 rounded-lg shadow-sm">
+      {/* Calendar Container */}
+      <div className="flex-1 p-4 min-h-[550px]">
         <DnDCalendar
           localizer={localizer}
           events={events}
@@ -391,9 +422,9 @@ export function CalendarView({
           onView={handleViewChange as (view: string) => void}
           date={currentDate}
           onNavigate={handleNavigate}
-          toolbar={false} // Désactiver la toolbar native
-          min={new Date(2024, 0, 1, 8, 0)}
-          max={new Date(2024, 0, 1, 22, 0)}
+          toolbar={false}
+          min={new Date(2024, 0, 1, 7, 0)}
+          max={new Date(2024, 0, 1, 23, 0)}
           eventPropGetter={eventPropGetter}
           draggableAccessor={draggableAccessor}
           resizableAccessor={resizableAccessor}
