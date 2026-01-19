@@ -13,7 +13,9 @@ import {
   isBefore,
   areIntervalsOverlapping,
   differenceInMinutes,
+  differenceInDays,
   format,
+  getDay,
 } from 'date-fns';
 import type {
   Task,
@@ -31,11 +33,19 @@ import type {
 // ============================================
 
 export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
-  workStartHour: 8,    // 8:00 AM
-  workEndHour: 22,     // 10:00 PM
+  dailyWorkHours: {
+    0: { start: 10, end: 18 }, // Sunday: 10:00 AM - 6:00 PM
+    1: { start: 8, end: 22 },  // Monday: 8:00 AM - 10:00 PM
+    2: { start: 8, end: 22 },  // Tuesday: 8:00 AM - 10:00 PM
+    3: { start: 8, end: 22 },  // Wednesday: 8:00 AM - 10:00 PM
+    4: { start: 8, end: 22 },  // Thursday: 8:00 AM - 10:00 PM
+    5: { start: 8, end: 22 },  // Friday: 8:00 AM - 10:00 PM
+    6: { start: 10, end: 18 }, // Saturday: 10:00 AM - 6:00 PM
+  },
   minBlockMinutes: 30, // Minimum 30 min blocks
   maxBlockMinutes: 120, // Maximum 2h blocks
   breakBetweenBlocks: 15, // 15 min break
+  maxDailyMinutesPerTask: 120, // Max 2h per task per day (spread work)
 };
 
 // ============================================
@@ -93,11 +103,19 @@ function getBlockedRanges(
 function getWorkingSlots(
   day: Date,
   config: SchedulerConfig
-): TimeSlot {
+): TimeSlot | null {
+  const dayOfWeek = getDay(day); // 0 = Sunday, 6 = Saturday
+  const dayConfig = config.dailyWorkHours[dayOfWeek];
+  
+  // If no config for this day, return null (no working hours)
+  if (!dayConfig) {
+    return null;
+  }
+  
   const dayStart = startOfDay(day);
   return {
-    start: setMinutes(setHours(dayStart, config.workStartHour), 0),
-    end: setMinutes(setHours(dayStart, config.workEndHour), 0),
+    start: setMinutes(setHours(dayStart, dayConfig.start), 0),
+    end: setMinutes(setHours(dayStart, dayConfig.end), 0),
   };
 }
 
@@ -111,6 +129,12 @@ function findFreeSlots(
   config: SchedulerConfig
 ): TimeSlot[] {
   const workingHours = getWorkingSlots(day, config);
+  
+  // If no working hours for this day, return empty array
+  if (!workingHours) {
+    return [];
+  }
+  
   const freeSlots: TimeSlot[] = [];
 
   // Filter blocked ranges that fall on this day
@@ -248,6 +272,12 @@ export async function generateScheduleBlocks(
 
     if (remainingMinutes <= 0) continue;
 
+    // Track daily usage for this task to spread work
+    const dailyUsage = new Map<number, number>();
+    
+    // Calculate urgency: if deadline is within 2 days, don't limit daily work
+    const isUrgent = differenceInDays(deadline, now) <= 2;
+
     // Try to schedule in free slots before deadline
     for (const slot of allFreeSlots) {
       if (remainingMinutes <= 0) break;
@@ -256,11 +286,23 @@ export async function generateScheduleBlocks(
       const slotDuration = differenceInMinutes(slot.end, slot.start);
       if (slotDuration < config.minBlockMinutes) continue;
 
-      // Determine block duration
+      // Check daily limit for this task (skip if non-urgent and limit reached)
+      const usedToday = dailyUsage.get(slot.dayIndex) || 0;
+      if (!isUrgent && usedToday >= config.maxDailyMinutesPerTask) {
+        continue; // Skip to next slot (likely another day)
+      }
+
+      // Calculate remaining daily allowance
+      const dailyAllowance = isUrgent 
+        ? Infinity 
+        : config.maxDailyMinutesPerTask - usedToday;
+
+      // Determine block duration (respecting daily limit)
       const blockDuration = Math.min(
         remainingMinutes,
         slotDuration,
-        config.maxBlockMinutes
+        config.maxBlockMinutes,
+        dailyAllowance
       );
 
       if (blockDuration < config.minBlockMinutes) continue;
@@ -287,6 +329,9 @@ export async function generateScheduleBlocks(
       };
 
       createdBlocks.push(newBlock);
+
+      // Update daily usage for this task
+      dailyUsage.set(slot.dayIndex, usedToday + blockDuration);
 
       // Update slot (shrink it)
       slot.start = addMinutes(blockEnd, config.breakBetweenBlocks);

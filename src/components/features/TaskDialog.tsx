@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { supabase } from "@/lib/supabase";
+import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,78 +12,156 @@ import {
   DialogTrigger,
   DialogFooter,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
-import { BookOpen, Plus } from "lucide-react";
+import { BookOpen, Plus, Pencil } from "lucide-react";
+import { usePlannerStore } from "@/store/plannerStore";
+import type { Task } from "@/types";
 
-// Cette fonction permet de dire au parent "Hey, j'ai fini d'ajouter une tâche !"
-interface TaskDialogProps {
-  onTaskAdded: () => void;
+// Mapping priorité -> difficulté/importance
+const PRIORITY_MAP = {
+  low: { difficulty: 1, importance: 1 },
+  medium: { difficulty: 2, importance: 3 },
+  high: { difficulty: 4, importance: 4 },
+  critical: { difficulty: 5, importance: 5 },
+} as const;
+
+type PriorityLevel = keyof typeof PRIORITY_MAP;
+
+// Reverse mapping: difficulty/importance -> priority
+function getPriorityFromTask(difficulty: number, importance: number): PriorityLevel {
+  if (difficulty >= 5 || importance >= 5) return "critical";
+  if (difficulty >= 4 || importance >= 4) return "high";
+  if (difficulty >= 2 || importance >= 2) return "medium";
+  return "low";
 }
 
-export function TaskDialog({ onTaskAdded }: TaskDialogProps) {
+// Format datetime-local value from ISO string
+function formatDateTimeLocal(isoString: string): string {
+  const date = new Date(isoString);
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+interface TaskDialogProps {
+  onTaskAdded?: () => void;
+  taskToEdit?: Task;
+  trigger?: React.ReactNode;
+}
+
+export function TaskDialog({ onTaskAdded, taskToEdit, trigger }: TaskDialogProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  
+  const addTask = usePlannerStore((state) => state.addTask);
+  const updateTask = usePlannerStore((state) => state.updateTask);
+
+  const isEditMode = !!taskToEdit;
 
   // Les champs du formulaire
   const [formData, setFormData] = useState({
     title: "",
     deadline: "",
     estimated_hours: "2",
-    difficulty: "3",
-    importance: "3",
+    priority: "medium" as PriorityLevel,
   });
+
+  // Pré-remplir le formulaire en mode édition
+  useEffect(() => {
+    if (taskToEdit && open) {
+      setFormData({
+        title: taskToEdit.title,
+        deadline: formatDateTimeLocal(taskToEdit.deadline),
+        estimated_hours: String(taskToEdit.estimated_hours),
+        priority: getPriorityFromTask(taskToEdit.difficulty, taskToEdit.importance),
+      });
+    } else if (!open) {
+      // Reset form when dialog closes
+      setFormData({
+        title: "",
+        deadline: "",
+        estimated_hours: "2",
+        priority: "medium",
+      });
+    }
+  }, [taskToEdit, open]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
-    // 1. Récupérer l'utilisateur courant
-    const { data: { user } } = await supabase.auth.getUser();
+    // Mapper la priorité vers difficulté/importance
+    const { difficulty, importance } = PRIORITY_MAP[formData.priority];
 
-    if (!user) {
-      toast.error("Vous devez être connecté");
-      return;
-    }
-
-    // 2. Sauvegarder dans Supabase
-    const { error } = await supabase.from("tasks").insert({
-      user_id: user.id,
+    const taskData = {
       title: formData.title,
       deadline: new Date(formData.deadline).toISOString(),
       estimated_hours: parseFloat(formData.estimated_hours),
-      difficulty: parseInt(formData.difficulty),
-      importance: parseInt(formData.importance),
-    });
+      difficulty,
+      importance,
+    };
 
-    if (error) {
-      toast.error("Erreur : " + error.message);
+    let success: boolean;
+
+    if (isEditMode) {
+      success = await updateTask(taskToEdit.id, taskData);
+      if (success) {
+        toast.success("Examen modifié !");
+      } else {
+        toast.error("Erreur lors de la modification");
+      }
     } else {
-      toast.success("Examen ajouté !");
-      setOpen(false); // Fermer la fenêtre
-      setFormData({ title: "", deadline: "", estimated_hours: "2", difficulty: "3", importance: "3" }); // Reset
-      onTaskAdded(); // Rafraichir la liste derrière
+      success = await addTask(taskData);
+      if (success) {
+        toast.success("Examen ajouté !");
+        onTaskAdded?.();
+      } else {
+        toast.error("Erreur lors de l'ajout");
+      }
+    }
+
+    if (success) {
+      setOpen(false);
     }
     setLoading(false);
   };
 
+  const defaultTrigger = (
+    <Button 
+      className="w-full gap-2 rounded-xl border-dashed border-2 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50 text-slate-600 hover:text-indigo-600 transition-all bg-transparent"
+      variant="outline"
+    >
+      <Plus className="h-4 w-4" />
+      Ajouter un examen
+    </Button>
+  );
+
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button 
-          className="w-full gap-2 rounded-xl border-dashed border-2 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50 text-slate-600 hover:text-indigo-600 transition-all bg-transparent"
-          variant="outline"
-        >
-          <Plus className="h-4 w-4" />
-          Ajouter un examen
-        </Button>
+        {trigger || defaultTrigger}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px] rounded-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-slate-800">
             <div className="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
-              <BookOpen className="h-4 w-4 text-indigo-600" />
+              {isEditMode ? (
+                <Pencil className="h-4 w-4 text-indigo-600" />
+              ) : (
+                <BookOpen className="h-4 w-4 text-indigo-600" />
+              )}
             </div>
-            Ajouter un examen
+            {isEditMode ? "Modifier l'examen" : "Ajouter un examen"}
           </DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="grid gap-4 py-4">
@@ -130,30 +207,23 @@ export function TaskDialog({ onTaskAdded }: TaskDialogProps) {
             />
           </div>
 
-          {/* Difficulté & Importance (Côte à côte) */}
-          <div className="grid grid-cols-2 gap-4">
-            <div className="grid gap-2">
-              <Label className="text-sm font-medium text-slate-700">Difficulté (1-5)</Label>
-              <Input
-                type="number"
-                min="1"
-                max="5"
-                value={formData.difficulty}
-                onChange={(e) => setFormData({ ...formData, difficulty: e.target.value })}
-                className="rounded-xl border-slate-200 focus:border-indigo-300 focus:ring-indigo-200"
-              />
-            </div>
-            <div className="grid gap-2">
-              <Label className="text-sm font-medium text-slate-700">Importance (1-5)</Label>
-              <Input
-                type="number"
-                min="1"
-                max="5"
-                value={formData.importance}
-                onChange={(e) => setFormData({ ...formData, importance: e.target.value })}
-                className="rounded-xl border-slate-200 focus:border-indigo-300 focus:ring-indigo-200"
-              />
-            </div>
+          {/* Priorité */}
+          <div className="grid gap-2">
+            <Label className="text-sm font-medium text-slate-700">Priorité</Label>
+            <Select
+              value={formData.priority}
+              onValueChange={(value: PriorityLevel) => setFormData({ ...formData, priority: value })}
+            >
+              <SelectTrigger className="w-full rounded-xl border-slate-200 focus:border-indigo-300 focus:ring-indigo-200">
+                <SelectValue placeholder="Sélectionner une priorité" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">🟢 Basse</SelectItem>
+                <SelectItem value="medium">🟡 Moyenne</SelectItem>
+                <SelectItem value="high">🟠 Haute</SelectItem>
+                <SelectItem value="critical">🔴 Critique</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <DialogFooter className="mt-2">

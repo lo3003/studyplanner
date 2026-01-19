@@ -10,12 +10,14 @@ import type {
   FixedEvent,
   ScheduleBlock,
   CreateTaskInput,
+  UpdateTaskInput,
   CreateFixedEventInput,
   UpdateFixedEventInput,
   UpdateScheduleBlockInput,
   DateRange,
   PlannerStore,
   SchedulerResult,
+  SchedulerWarning,
 } from '@/types';
 import * as services from '@/lib/supabase/services';
 import { generateScheduleBlocks } from '@/lib/scheduler';
@@ -28,6 +30,7 @@ const initialState = {
   tasks: [] as Task[],
   fixedEvents: [] as FixedEvent[],
   scheduleBlocks: [] as ScheduleBlock[],
+  generationWarnings: [] as SchedulerWarning[],
   isLoading: false,
   isGenerating: false,
   error: null as string | null,
@@ -135,6 +138,26 @@ export const usePlannerStore = create<PlannerStore>()(
             (state) => ({ tasks: [...state.tasks, res.data!] }),
             false,
             'addTask/success'
+          );
+        }
+        return true;
+      },
+
+      updateTask: async (id: string, data: UpdateTaskInput) => {
+        const res = await services.updateTask(id, data);
+        if (res.error) {
+          set({ error: res.error }, false, 'updateTask/error');
+          return false;
+        }
+        if (res.data) {
+          set(
+            (state) => ({
+              tasks: state.tasks.map((t) =>
+                t.id === id ? res.data! : t
+              ),
+            }),
+            false,
+            'updateTask/success'
           );
         }
         return true;
@@ -292,13 +315,14 @@ export const usePlannerStore = create<PlannerStore>()(
 
             if (createRes.error) throw new Error(createRes.error);
 
-            // 5. Update local state with new blocks + locked blocks
+            // 5. Update local state with new blocks + locked blocks + warnings
             set(
               {
                 scheduleBlocks: [
                   ...lockedBlocks,
                   ...(createRes.data ?? []),
                 ],
+                generationWarnings: result.warnings,
                 isGenerating: false,
               },
               false,
@@ -309,6 +333,7 @@ export const usePlannerStore = create<PlannerStore>()(
             set(
               {
                 scheduleBlocks: lockedBlocks,
+                generationWarnings: result.warnings,
                 isGenerating: false,
               },
               false,
@@ -338,6 +363,30 @@ export const usePlannerStore = create<PlannerStore>()(
         set({ error: null }, false, 'clearError');
       },
 
+      clearGenerationWarnings: () => {
+        set({ generationWarnings: [] }, false, 'clearGenerationWarnings');
+      },
+
+      clearAllData: async () => {
+        set({ isLoading: true, error: null }, false, 'clearAllData/start');
+        
+        const res = await services.deleteAllUserData();
+        if (res.error) {
+          set({ error: res.error, isLoading: false }, false, 'clearAllData/error');
+          return false;
+        }
+        
+        set(
+          {
+            ...initialState,
+            userId: get().userId, // Keep the userId
+          },
+          false,
+          'clearAllData/success'
+        );
+        return true;
+      },
+
       reset: () => {
         set(initialState, false, 'reset');
       },
@@ -353,6 +402,7 @@ export const usePlannerStore = create<PlannerStore>()(
 export const selectTasks = (state: PlannerStore) => state.tasks;
 export const selectFixedEvents = (state: PlannerStore) => state.fixedEvents;
 export const selectScheduleBlocks = (state: PlannerStore) => state.scheduleBlocks;
+export const selectGenerationWarnings = (state: PlannerStore) => state.generationWarnings;
 export const selectIsLoading = (state: PlannerStore) => state.isLoading;
 export const selectIsGenerating = (state: PlannerStore) => state.isGenerating;
 export const selectError = (state: PlannerStore) => state.error;

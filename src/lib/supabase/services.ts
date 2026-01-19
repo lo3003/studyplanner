@@ -9,6 +9,7 @@ import type {
   FixedEvent,
   ScheduleBlock,
   CreateTaskInput,
+  UpdateTaskInput,
   CreateFixedEventInput,
   UpdateFixedEventInput,
   CreateScheduleBlockInput,
@@ -64,6 +65,23 @@ export async function createTask(input: CreateTaskInput): Promise<ApiResponse<Ta
       difficulty: input.difficulty,
       importance: input.importance,
     })
+    .select()
+    .single();
+
+  return {
+    data: data as Task | null,
+    error: error?.message ?? null,
+  };
+}
+
+export async function updateTask(
+  taskId: string,
+  updates: UpdateTaskInput
+): Promise<ApiResponse<Task>> {
+  const { data, error } = await supabase
+    .from('tasks')
+    .update(updates)
+    .eq('id', taskId)
     .select()
     .single();
 
@@ -339,4 +357,49 @@ export async function getLockedBlocks(range?: DateRange): Promise<ApiResponse<Sc
     data: data as ScheduleBlock[] | null,
     error: error?.message ?? null,
   };
+}
+
+// ============================================
+// DELETE ALL USER DATA
+// ============================================
+
+export async function deleteAllUserData(): Promise<ApiResponse<null>> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return { data: null, error: 'User not authenticated' };
+  }
+
+  // Delete in order to respect foreign key constraints:
+  // 1. schedule_blocks (references tasks)
+  // 2. fixed_events
+  // 3. tasks
+
+  const { error: blocksError } = await supabase
+    .from('schedule_blocks')
+    .delete()
+    .eq('user_id', userId);
+
+  if (blocksError) {
+    return { data: null, error: blocksError.message };
+  }
+
+  const { error: eventsError } = await supabase
+    .from('fixed_events')
+    .delete()
+    .eq('user_id', userId);
+
+  if (eventsError) {
+    return { data: null, error: eventsError.message };
+  }
+
+  const { error: tasksError } = await supabase
+    .from('tasks')
+    .delete()
+    .eq('user_id', userId);
+
+  if (tasksError) {
+    return { data: null, error: tasksError.message };
+  }
+
+  return { data: null, error: null };
 }

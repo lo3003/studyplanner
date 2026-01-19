@@ -15,10 +15,12 @@ import {
   BookOpen,
   CalendarDays,
   Target,
-  TrendingUp
+  TrendingUp,
+  Pencil
 } from "lucide-react";
 import { TaskDialog } from "@/components/features/TaskDialog";
 import { FixedEventDialog, FixedEventItem } from "@/components/features/FixedEventDialog";
+import { WarningAlert } from "@/components/features/WarningAlert";
 import { usePlannerStore, selectTasks, selectFixedEvents, selectScheduleBlocks, selectIsLoading, selectIsGenerating } from "@/store/plannerStore";
 import { toast } from "sonner";
 import type { Task } from "@/types";
@@ -294,6 +296,7 @@ export default function Dashboard() {
 
           {/* Calendar Area */}
           <div className="lg:col-span-9">
+            <WarningAlert />
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
               <CalendarView tasks={tasks} fixedEvents={fixedEvents} scheduleBlocks={scheduleBlocks} />
             </div>
@@ -372,14 +375,28 @@ function TaskCard({ task, onDelete }: { task: Task; onDelete: (e: React.MouseEve
             </span>
           </div>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={onDelete}
-          className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-        >
-          <Trash2 className="w-4 h-4" />
-        </Button>
+        <div className="flex gap-1">
+          <TaskDialog 
+            taskToEdit={task}
+            trigger={
+              <Button
+                variant="ghost"
+                size="sm"
+                className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
+              >
+                <Pencil className="w-4 h-4" />
+              </Button>
+            }
+          />
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onDelete}
+            className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
+          >
+            <Trash2 className="w-4 h-4" />
+          </Button>
+        </div>
       </div>
       
       {/* Progress indicator */}

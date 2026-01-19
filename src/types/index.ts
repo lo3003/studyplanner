@@ -87,6 +87,14 @@ export interface CreateTaskInput {
   importance: number;
 }
 
+export interface UpdateTaskInput {
+  title?: string;
+  deadline?: string;
+  estimated_hours?: number;
+  difficulty?: number;
+  importance?: number;
+}
+
 // ============================================
 // Calendar Event Types (for react-big-calendar)
 // ============================================
@@ -116,12 +124,22 @@ export interface TimeSlot {
   end: Date;
 }
 
+export interface DailyWorkHours {
+  start: number; // Hour of day (0-23)
+  end: number;   // Hour of day (0-23)
+}
+
+// Maps day of week (0 = Sunday, 6 = Saturday) to work hours
+export type WeeklyWorkHours = {
+  [day: number]: DailyWorkHours;
+};
+
 export interface SchedulerConfig {
-  workStartHour: number; // e.g., 8 for 8:00 AM
-  workEndHour: number; // e.g., 22 for 10:00 PM
+  dailyWorkHours: WeeklyWorkHours; // Work hours per day of week (0-6)
   minBlockMinutes: number; // e.g., 30
   maxBlockMinutes: number; // e.g., 120
   breakBetweenBlocks: number; // minutes
+  maxDailyMinutesPerTask: number; // Max minutes per task per day (to spread work)
 }
 
 export interface SchedulerResult {
@@ -165,6 +183,9 @@ export interface PlannerState {
   fixedEvents: FixedEvent[];
   scheduleBlocks: ScheduleBlock[];
   
+  // Generation warnings
+  generationWarnings: SchedulerWarning[];
+  
   // Loading states
   isLoading: boolean;
   isGenerating: boolean;
@@ -188,6 +209,7 @@ export interface PlannerActions {
   
   // Tasks
   addTask: (task: CreateTaskInput) => Promise<boolean>;
+  updateTask: (id: string, data: UpdateTaskInput) => Promise<boolean>;
   deleteTask: (taskId: string) => Promise<boolean>;
   
   // Fixed Events
@@ -204,6 +226,8 @@ export interface PlannerActions {
   
   // Utils
   clearError: () => void;
+  clearGenerationWarnings: () => void;
+  clearAllData: () => Promise<boolean>;
   reset: () => void;
 }
 
