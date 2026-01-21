@@ -182,17 +182,17 @@ export interface PlannerState {
   tasks: Task[];
   fixedEvents: FixedEvent[];
   scheduleBlocks: ScheduleBlock[];
-  
+
   // Generation warnings
   generationWarnings: SchedulerWarning[];
-  
+
   // Loading states
   isLoading: boolean;
   isGenerating: boolean;
-  
+
   // Error state
   error: string | null;
-  
+
   // Current user
   userId: string | null;
 }
@@ -200,33 +200,34 @@ export interface PlannerState {
 export interface PlannerActions {
   // Initialization
   setUserId: (userId: string | null) => void;
-  
+
   // Fetch
   fetchAll: () => Promise<void>;
   fetchTasks: () => Promise<void>;
   fetchFixedEvents: (range?: DateRange) => Promise<void>;
   fetchScheduleBlocks: (range?: DateRange) => Promise<void>;
-  
+
   // Tasks
   addTask: (task: CreateTaskInput) => Promise<boolean>;
   updateTask: (id: string, data: UpdateTaskInput) => Promise<boolean>;
   deleteTask: (taskId: string) => Promise<boolean>;
-  
+
   // Fixed Events
   addFixedEvent: (event: CreateFixedEventInput) => Promise<boolean>;
   updateFixedEvent: (id: string, event: UpdateFixedEventInput) => Promise<boolean>;
   deleteFixedEvent: (id: string) => Promise<boolean>;
-  
+
   // Schedule Blocks
   updateScheduleBlock: (id: string, data: UpdateScheduleBlockInput) => Promise<boolean>;
   deleteScheduleBlock: (id: string) => Promise<boolean>;
-  
+
   // Scheduler
   generateSchedule: () => Promise<SchedulerResult | null>;
-  
+
   // Utils
   clearError: () => void;
   clearGenerationWarnings: () => void;
+  clearSchedule: () => Promise<boolean>;
   clearAllData: () => Promise<boolean>;
   reset: () => void;
 }

@@ -367,15 +367,36 @@ export const usePlannerStore = create<PlannerStore>()(
         set({ generationWarnings: [] }, false, 'clearGenerationWarnings');
       },
 
+      clearSchedule: async () => {
+        set({ isLoading: true, error: null }, false, 'clearSchedule/start');
+
+        const res = await services.deleteAllScheduleBlocks();
+        if (res.error) {
+          set({ error: res.error, isLoading: false }, false, 'clearSchedule/error');
+          return false;
+        }
+
+        set(
+          {
+            scheduleBlocks: [], // Clear local blocks
+            generationWarnings: [],
+            isLoading: false
+          },
+          false,
+          'clearSchedule/success'
+        );
+        return true;
+      },
+
       clearAllData: async () => {
         set({ isLoading: true, error: null }, false, 'clearAllData/start');
-        
+
         const res = await services.deleteAllUserData();
         if (res.error) {
           set({ error: res.error, isLoading: false }, false, 'clearAllData/error');
           return false;
         }
-        
+
         set(
           {
             ...initialState,

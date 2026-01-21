@@ -49,6 +49,53 @@ export const DEFAULT_SCHEDULER_CONFIG: SchedulerConfig = {
 };
 
 // ============================================
+// Round-Robin Scheduler Configuration
+// ============================================
+
+export const ROUND_ROBIN_CONFIG = {
+  MIN_SPACING_DAYS: 1, // Minimum days between same-task sessions
+  MAX_DAILY_TOTAL_STUDY: 360, // 6 hours max total study per day
+  DAILY_SATURATION_THRESHOLD: 0.75, // Prefer days under 75% full
+  PREFERRED_SESSION_DURATIONS: [120, 90, 60, 45, 30], // In minutes
+};
+
+// ============================================
+// Round-Robin Data Structures
+// ============================================
+
+/**
+ * Tracking context for each task in the scheduling process
+ */
+interface TaskSchedulingContext {
+  task: Task;
+  remainingMinutes: number;
+  targetSessions: number;
+  targetSpacingDays: number;
+  lastSessionDate: Date | null;
+  scheduledSessions: number;
+  priority: number;
+}
+
+/**
+ * Daily slot availability tracking
+ */
+interface DaySlotInventory {
+  date: Date;
+  dayIndex: number;
+  freeSlots: TimeSlot[];
+  totalAvailableMinutes: number;
+  usedStudyMinutes: number;
+  saturation: number; // 0-1, how full the day is
+}
+
+/**
+ * Tracks task usage per day
+ */
+interface DailyTaskUsage {
+  [taskId: string]: number; // minutes used by this task on this day
+}
+
+// ============================================
 // Helper: Check if two time ranges overlap
 // ============================================
 
@@ -106,12 +153,12 @@ function getWorkingSlots(
 ): TimeSlot | null {
   const dayOfWeek = getDay(day); // 0 = Sunday, 6 = Saturday
   const dayConfig = config.dailyWorkHours[dayOfWeek];
-  
+
   // If no config for this day, return null (no working hours)
   if (!dayConfig) {
     return null;
   }
-  
+
   const dayStart = startOfDay(day);
   return {
     start: setMinutes(setHours(dayStart, dayConfig.start), 0),
@@ -129,12 +176,12 @@ function findFreeSlots(
   config: SchedulerConfig
 ): TimeSlot[] {
   const workingHours = getWorkingSlots(day, config);
-  
+
   // If no working hours for this day, return empty array
   if (!workingHours) {
     return [];
   }
-  
+
   const freeSlots: TimeSlot[] = [];
 
   // Filter blocked ranges that fall on this day
@@ -185,18 +232,340 @@ function findFreeSlots(
 // Helper: Calculate task priority score
 // ============================================
 
+/**
+ * Calculate a priority score for a task based on its deadline slack, importance and difficulty.
+ *
+ * score = (importance × BETA + difficulty × ALPHA) / (slackDays + epsilon) × lengthFactor
+ */
 function calculatePriorityScore(task: Task): number {
-  const deadline = new Date(task.deadline);
+  const ALPHA = 1.0;
+  const BETA = 1.5;
+  const epsilon = 1e-6;
+
   const now = new Date();
-  const daysUntilDeadline = Math.max(0, differenceInMinutes(deadline, now) / (60 * 24));
-  
-  // Higher score = higher priority
-  // Factor in: deadline urgency, difficulty, importance
-  const urgencyScore = Math.max(0, 100 - daysUntilDeadline * 5);
-  const difficultyScore = task.difficulty * 10;
-  const importanceScore = task.importance * 15;
-  
-  return urgencyScore + difficultyScore + importanceScore;
+  const deadline = new Date(task.deadline);
+
+  const estimatedMinutes = task.estimated_hours * 60;
+  const minutesUntilDeadline = Math.max(0, differenceInMinutes(deadline, now));
+
+  const daysUntilDeadline = minutesUntilDeadline / (60 * 24);
+  const estimatedDays = estimatedMinutes / (60 * 24);
+  const slackDays = daysUntilDeadline - estimatedDays;
+
+  const effectiveSlack = Math.max(slackDays, 0) + epsilon;
+  const weightedScore = task.importance * BETA + task.difficulty * ALPHA;
+  const lengthFactor = task.estimated_hours > 0 ? 1 / task.estimated_hours : 1;
+
+  return (weightedScore / effectiveSlack) * lengthFactor;
+}
+
+// ============================================
+// Phase 1: Pre-Analysis - Task Planning
+// ============================================
+
+/**
+ * Calculate scheduling plan for a task
+ */
+function calculateTaskSchedulingPlan(
+  task: Task,
+  now: Date
+): Pick<TaskSchedulingContext, 'targetSessions' | 'targetSpacingDays' | 'remainingMinutes'> {
+  const deadline = new Date(task.deadline);
+  const totalMinutes = task.estimated_hours * 60;
+  const daysUntilDeadline = Math.max(1, Math.ceil(differenceInDays(deadline, now)));
+
+  // Estimate number of sessions (assuming 60-minute avg sessions)
+  const avgSessionMinutes = 60;
+  const targetSessions = Math.ceil(totalMinutes / avgSessionMinutes);
+
+  // Calculate ideal spacing between sessions
+  const targetSpacingDays = targetSessions > 1
+    ? Math.max(1, Math.floor(daysUntilDeadline / targetSessions))
+    : 0;
+
+  return {
+    targetSessions,
+    targetSpacingDays,
+    remainingMinutes: totalMinutes,
+  };
+}
+
+// ============================================
+// Phase 2: Slot Inventory - Build daily availability
+// ============================================
+
+/**
+ * Build inventory of available slots for each day
+ */
+function buildDailySlotInventory(
+  startDate: Date,
+  numDays: number,
+  blockedRanges: Array<{ start: Date; end: Date }>,
+  config: SchedulerConfig
+): Map<number, DaySlotInventory> {
+  const inventory = new Map<number, DaySlotInventory>();
+
+  for (let dayIndex = 0; dayIndex < numDays; dayIndex++) {
+    const date = addDays(startOfDay(startDate), dayIndex);
+    const freeSlots = findFreeSlots(date, blockedRanges, config);
+
+    const totalAvailableMinutes = freeSlots.reduce(
+      (sum, slot) => sum + differenceInMinutes(slot.end, slot.start),
+      0
+    );
+
+    inventory.set(dayIndex, {
+      date,
+      dayIndex,
+      freeSlots,
+      totalAvailableMinutes,
+      usedStudyMinutes: 0,
+      saturation: 0,
+    });
+  }
+
+  return inventory;
+}
+
+/**
+ * Get available minutes for a specific day accounting for usage
+ */
+function getDayAvailableMinutes(dayInventory: DaySlotInventory): number {
+  return Math.max(0, dayInventory.totalAvailableMinutes - dayInventory.usedStudyMinutes);
+}
+
+/**
+ * Update day saturation after scheduling
+ */
+function updateDaySaturation(dayInventory: DaySlotInventory): void {
+  if (dayInventory.totalAvailableMinutes === 0) {
+    dayInventory.saturation = 1;
+  } else {
+    dayInventory.saturation = dayInventory.usedStudyMinutes / dayInventory.totalAvailableMinutes;
+  }
+}
+
+// ============================================
+// Phase 3: Round-Robin Core - Main scheduling logic
+// ============================================
+
+/**
+ * Find the next suitable day for scheduling a task session
+ */
+function findNextSuitableDay(
+  taskContext: TaskSchedulingContext,
+  inventory: Map<number, DaySlotInventory>,
+  dailyTaskUsage: Map<number, DailyTaskUsage>,
+  startDayIndex: number,
+  config: SchedulerConfig
+): { dayIndex: number; dayInventory: DaySlotInventory } | null {
+  const deadline = new Date(taskContext.task.deadline);
+
+  for (let dayIndex = startDayIndex; dayIndex < inventory.size; dayIndex++) {
+    const dayInventory = inventory.get(dayIndex);
+    if (!dayInventory) continue;
+
+    // Check if day is before deadline
+    if (isAfter(dayInventory.date, deadline)) continue;
+
+    // Check spacing constraint
+    if (taskContext.lastSessionDate) {
+      const daysSinceLastSession = differenceInDays(dayInventory.date, taskContext.lastSessionDate);
+      if (daysSinceLastSession < ROUND_ROBIN_CONFIG.MIN_SPACING_DAYS) continue;
+    }
+
+    // Check if day has available capacity
+    const availableMinutes = getDayAvailableMinutes(dayInventory);
+    if (availableMinutes < config.minBlockMinutes) continue;
+
+    // Check daily total study limit
+    if (dayInventory.usedStudyMinutes >= ROUND_ROBIN_CONFIG.MAX_DAILY_TOTAL_STUDY) continue;
+
+    // Check daily task limit
+    const taskUsage = dailyTaskUsage.get(dayIndex) || {};
+    const taskMinutesUsed = taskUsage[taskContext.task.id] || 0;
+    if (taskMinutesUsed >= config.maxDailyMinutesPerTask) continue;
+
+    // Prefer days under saturation threshold
+    if (dayInventory.saturation < ROUND_ROBIN_CONFIG.DAILY_SATURATION_THRESHOLD) {
+      return { dayIndex, dayInventory };
+    }
+  }
+
+  // If no ideal day found, relax saturation constraint
+  for (let dayIndex = startDayIndex; dayIndex < inventory.size; dayIndex++) {
+    const dayInventory = inventory.get(dayIndex);
+    if (!dayInventory) continue;
+
+    if (isAfter(dayInventory.date, deadline)) continue;
+
+    if (taskContext.lastSessionDate) {
+      const daysSinceLastSession = differenceInDays(dayInventory.date, taskContext.lastSessionDate);
+      if (daysSinceLastSession < ROUND_ROBIN_CONFIG.MIN_SPACING_DAYS) continue;
+    }
+
+    const availableMinutes = getDayAvailableMinutes(dayInventory);
+    if (availableMinutes < config.minBlockMinutes) continue;
+
+    if (dayInventory.usedStudyMinutes >= ROUND_ROBIN_CONFIG.MAX_DAILY_TOTAL_STUDY) continue;
+
+    const taskUsage = dailyTaskUsage.get(dayIndex) || {};
+    const taskMinutesUsed = taskUsage[taskContext.task.id] || 0;
+    if (taskMinutesUsed >= config.maxDailyMinutesPerTask) continue;
+
+    return { dayIndex, dayInventory };
+  }
+
+  return null;
+}
+
+/**
+ * Calculate optimal session duration for a slot
+ */
+function calculateOptimalSessionDuration(
+  taskContext: TaskSchedulingContext,
+  dayInventory: DaySlotInventory,
+  dailyTaskUsage: Map<number, DailyTaskUsage>,
+  config: SchedulerConfig
+): number {
+  const taskUsage = dailyTaskUsage.get(dayInventory.dayIndex) || {};
+  const taskMinutesUsed = taskUsage[taskContext.task.id] || 0;
+
+  const dailyAllowance = config.maxDailyMinutesPerTask - taskMinutesUsed;
+  const dayAvailable = getDayAvailableMinutes(dayInventory);
+  const totalStudyAllowance = ROUND_ROBIN_CONFIG.MAX_DAILY_TOTAL_STUDY - dayInventory.usedStudyMinutes;
+
+  const maxPossible = Math.min(
+    taskContext.remainingMinutes,
+    dailyAllowance,
+    dayAvailable,
+    totalStudyAllowance,
+    config.maxBlockMinutes
+  );
+
+  if (maxPossible < config.minBlockMinutes) return 0;
+
+  // Snap to preferred durations
+  for (const preferredDuration of ROUND_ROBIN_CONFIG.PREFERRED_SESSION_DURATIONS) {
+    if (preferredDuration <= maxPossible && preferredDuration >= config.minBlockMinutes) {
+      return preferredDuration;
+    }
+  }
+
+  return maxPossible >= config.minBlockMinutes ? maxPossible : 0;
+}
+
+/**
+ * Main round-robin scheduling algorithm
+ */
+function scheduleTasksRoundRobin(
+  tasks: Task[],
+  inventory: Map<number, DaySlotInventory>,
+  now: Date,
+  config: SchedulerConfig
+): { contexts: TaskSchedulingContext[]; createdBlocks: ScheduleBlock[] } {
+  const taskContexts: TaskSchedulingContext[] = tasks.map(task => {
+    const plan = calculateTaskSchedulingPlan(task, now);
+    return {
+      task,
+      ...plan,
+      lastSessionDate: null,
+      scheduledSessions: 0,
+      priority: calculatePriorityScore(task),
+    };
+  }).sort((a, b) => b.priority - a.priority);
+
+  const createdBlocks: ScheduleBlock[] = [];
+  const dailyTaskUsage = new Map<number, DailyTaskUsage>();
+
+  let currentDayIndex = 0;
+  let maxRounds = 200;
+  let roundsWithoutPlacement = 0;
+
+  while (maxRounds-- > 0) {
+    let placedThisRound = false;
+
+    for (const taskContext of taskContexts) {
+      if (taskContext.remainingMinutes <= 0) continue;
+
+      const result = findNextSuitableDay(
+        taskContext,
+        inventory,
+        dailyTaskUsage,
+        currentDayIndex,
+        config
+      );
+
+      if (!result) continue;
+
+      const { dayIndex, dayInventory } = result;
+
+      const sessionDuration = calculateOptimalSessionDuration(
+        taskContext,
+        dayInventory,
+        dailyTaskUsage,
+        config
+      );
+
+      if (sessionDuration < config.minBlockMinutes) continue;
+
+      const suitableSlot = dayInventory.freeSlots.find(
+        slot => differenceInMinutes(slot.end, slot.start) >= sessionDuration
+      );
+
+      if (!suitableSlot) continue;
+
+      const blockStart = suitableSlot.start;
+      const blockEnd = addMinutes(blockStart, sessionDuration);
+
+      const newBlock: ScheduleBlock = {
+        id: crypto.randomUUID(),
+        user_id: taskContext.task.user_id,
+        task_id: taskContext.task.id,
+        title: taskContext.task.title,
+        start_at: blockStart.toISOString(),
+        end_at: blockEnd.toISOString(),
+        duration_minutes: sessionDuration,
+        is_locked: false,
+        color: '#3b82f6',
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      };
+
+      createdBlocks.push(newBlock);
+      taskContext.remainingMinutes -= sessionDuration;
+      taskContext.scheduledSessions++;
+      taskContext.lastSessionDate = dayInventory.date;
+
+      dayInventory.usedStudyMinutes += sessionDuration;
+      updateDaySaturation(dayInventory);
+
+      const nextStart = addMinutes(blockEnd, config.breakBetweenBlocks);
+      suitableSlot.start = nextStart;
+
+      if (!dailyTaskUsage.has(dayIndex)) {
+        dailyTaskUsage.set(dayIndex, {});
+      }
+      const taskUsage = dailyTaskUsage.get(dayIndex)!;
+      taskUsage[taskContext.task.id] = (taskUsage[taskContext.task.id] || 0) + sessionDuration;
+
+      placedThisRound = true;
+    }
+
+    if (!placedThisRound) {
+      roundsWithoutPlacement++;
+      currentDayIndex++;
+
+      if (roundsWithoutPlacement > 10 || currentDayIndex >= inventory.size) break;
+    } else {
+      roundsWithoutPlacement = 0;
+    }
+
+    const allComplete = taskContexts.every(tc => tc.remainingMinutes <= 0);
+    if (allComplete) break;
+  }
+
+  return { contexts: taskContexts, createdBlocks };
 }
 
 // ============================================
@@ -210,154 +579,53 @@ export async function generateScheduleBlocks(
   config: SchedulerConfig = DEFAULT_SCHEDULER_CONFIG
 ): Promise<SchedulerResult> {
   const warnings: SchedulerWarning[] = [];
-  const createdBlocks: ScheduleBlock[] = [];
   const now = new Date();
-
   // Filter tasks with remaining hours to schedule
-  const tasksToSchedule = tasks
-    .filter((task) => {
-      const deadline = new Date(task.deadline);
-      return isAfter(deadline, now) && task.estimated_hours > 0;
-    })
-    .map((task) => ({
-      ...task,
-      remainingMinutes: task.estimated_hours * 60,
-      priority: calculatePriorityScore(task),
-    }))
-    .sort((a, b) => b.priority - a.priority); // Sort by priority descending
-
+  const tasksToSchedule = tasks.filter(task => {
+    const deadline = new Date(task.deadline);
+    return isAfter(deadline, now) && task.estimated_hours > 0;
+  });
   if (tasksToSchedule.length === 0) {
     return { success: true, createdBlocks: [], warnings: [] };
   }
-
-  // Get all blocked ranges
+  // Get allblocked ranges
   const blockedRanges = getBlockedRanges(fixedEvents, lockedBlocks);
-
-  // Generate schedule for the next 30 days
-  const schedulingDays = 30;
-  const allFreeSlots: Array<TimeSlot & { dayIndex: number }> = [];
-
-  for (let dayIndex = 0; dayIndex < schedulingDays; dayIndex++) {
-    const day = addDays(startOfDay(now), dayIndex);
-    const dayFreeSlots = findFreeSlots(day, blockedRanges, config);
-    
-    for (const slot of dayFreeSlots) {
-      // Skip slots that are entirely in the past
-      if (isAfter(now, slot.end)) continue;
-      
-      // Adjust start if slot starts in the past
-      const adjustedStart = isBefore(slot.start, now) ? now : slot.start;
-      
-      if (differenceInMinutes(slot.end, adjustedStart) >= config.minBlockMinutes) {
-        allFreeSlots.push({
-          start: adjustedStart,
-          end: slot.end,
-          dayIndex,
-        });
-      }
-    }
-  }
-
-  // Schedule each task
-  for (const task of tasksToSchedule) {
-    const deadline = new Date(task.deadline);
-    let remainingMinutes = task.remainingMinutes;
-
-    // Calculate already scheduled minutes for this task (from locked blocks)
-    const scheduledMinutes = lockedBlocks
-      .filter((b) => b.task_id === task.id)
-      .reduce((sum, b) => sum + b.duration_minutes, 0);
-    
-    remainingMinutes = Math.max(0, remainingMinutes - scheduledMinutes);
-
-    if (remainingMinutes <= 0) continue;
-
-    // Track daily usage for this task to spread work
-    const dailyUsage = new Map<number, number>();
-    
-    // Calculate urgency: if deadline is within 2 days, don't limit daily work
-    const isUrgent = differenceInDays(deadline, now) <= 2;
-
-    // Try to schedule in free slots before deadline
-    for (const slot of allFreeSlots) {
-      if (remainingMinutes <= 0) break;
-      if (isAfter(slot.start, deadline)) continue; // Slot is after deadline
-
-      const slotDuration = differenceInMinutes(slot.end, slot.start);
-      if (slotDuration < config.minBlockMinutes) continue;
-
-      // Check daily limit for this task (skip if non-urgent and limit reached)
-      const usedToday = dailyUsage.get(slot.dayIndex) || 0;
-      if (!isUrgent && usedToday >= config.maxDailyMinutesPerTask) {
-        continue; // Skip to next slot (likely another day)
-      }
-
-      // Calculate remaining daily allowance
-      const dailyAllowance = isUrgent 
-        ? Infinity 
-        : config.maxDailyMinutesPerTask - usedToday;
-
-      // Determine block duration (respecting daily limit)
-      const blockDuration = Math.min(
-        remainingMinutes,
-        slotDuration,
-        config.maxBlockMinutes,
-        dailyAllowance
-      );
-
-      if (blockDuration < config.minBlockMinutes) continue;
-
-      // Create the block
-      const blockStart = slot.start;
-      const blockEnd = addMinutes(blockStart, blockDuration);
-
-      // Make sure block doesn't exceed deadline
-      if (isAfter(blockEnd, deadline)) continue;
-
-      const newBlock: ScheduleBlock = {
-        id: crypto.randomUUID(),
-        user_id: task.user_id,
-        task_id: task.id,
-        title: task.title,
-        start_at: blockStart.toISOString(),
-        end_at: blockEnd.toISOString(),
-        duration_minutes: blockDuration,
-        is_locked: false,
-        color: '#3b82f6',
-        created_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      };
-
-      createdBlocks.push(newBlock);
-
-      // Update daily usage for this task
-      dailyUsage.set(slot.dayIndex, usedToday + blockDuration);
-
-      // Update slot (shrink it)
-      slot.start = addMinutes(blockEnd, config.breakBetweenBlocks);
-      
-      // Update remaining
-      remainingMinutes -= blockDuration;
-
-      // Add to blocked ranges for subsequent scheduling
-      blockedRanges.push({
-        start: blockStart,
-        end: addMinutes(blockEnd, config.breakBetweenBlocks),
-      });
-      blockedRanges.sort((a, b) => a.start.getTime() - b.start.getTime());
-    }
-
-    // Check if task couldn't be fully scheduled
-    if (remainingMinutes > 0) {
+  // Generate schedule up to the furthest deadline
+  const furthestDeadline = tasksToSchedule
+    .map(t => new Date(t.deadline))
+    .reduce((max, d) => d.getTime() > max.getTime() ? d : max, new Date(now));
+  const minHorizonDays = 30;
+  const maxHorizonDays = 120;
+  const horizonDays = Math.min(
+    maxHorizonDays,
+    Math.max(minHorizonDays, differenceInDays(furthestDeadline, now) + 1)
+  );
+  // Build daily slot inventory
+  const inventory = buildDailySlotInventory(
+    startOfDay(now),
+    horizonDays,
+    blockedRanges,
+    config
+  );
+  // Run round-robin scheduler
+  const { contexts, createdBlocks } = scheduleTasksRoundRobin(
+    tasksToSchedule,
+    inventory,
+    now,
+    config
+  );
+  // Generate warnings for unscheduled work
+  for (const taskContext of contexts) {
+    if (taskContext.remainingMinutes > 0) {
+      const deadline = new Date(taskContext.task.deadline);
       warnings.push({
-        taskId: task.id,
-        taskTitle: task.title,
-        message: `Impossible de planifier ${Math.round(remainingMinutes / 60 * 10) / 10}h avant le ${format(deadline, 'dd/MM/yyyy')}`,
-        unscheduledHours: remainingMinutes / 60,
+        taskId: taskContext.task.id,
+        taskTitle: taskContext.task.title,
+        message: `Impossible de planifier ${Math.round(taskContext.remainingMinutes / 60 * 10) / 10}h avant le ${format(deadline, 'dd/MM/yyyy')}`,
+        unscheduledHours: taskContext.remainingMinutes / 60,
       });
     }
   }
-
   return {
     success: warnings.length === 0,
     createdBlocks,
@@ -376,7 +644,6 @@ export function checkCollision(
   lockedBlocks: ScheduleBlock[],
   excludeBlockId?: string
 ): { hasCollision: boolean; type?: 'fixed_event' | 'locked_block'; message?: string } {
-  // Check collision with fixed events
   for (const event of fixedEvents) {
     const eventStart = new Date(event.start_at);
     const eventEnd = new Date(event.end_at);
@@ -390,9 +657,7 @@ export function checkCollision(
     }
   }
 
-  // Check collision with locked blocks
   for (const block of lockedBlocks) {
-    // Skip the block being moved
     if (block.id === excludeBlockId) continue;
 
     const blockStart = new Date(block.start_at);

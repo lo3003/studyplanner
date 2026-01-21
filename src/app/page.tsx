@@ -4,45 +4,34 @@ import { useEffect, useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
-import { CalendarView } from "@/components/features/CalendarView";
-import { 
-  Loader2, 
-  Clock, 
-  Calendar as CalIcon, 
-  Sparkles, 
-  Trash2, 
+import {
+  Loader2,
   LogOut,
   BookOpen,
   CalendarDays,
   Target,
-  TrendingUp,
-  Pencil
+  LayoutGrid,
+  Settings,
+  Search,
+  Bell
 } from "lucide-react";
-import { TaskDialog } from "@/components/features/TaskDialog";
-import { FixedEventDialog, FixedEventItem } from "@/components/features/FixedEventDialog";
-import { WarningAlert } from "@/components/features/WarningAlert";
-import { usePlannerStore, selectTasks, selectFixedEvents, selectScheduleBlocks, selectIsLoading, selectIsGenerating } from "@/store/plannerStore";
-import { toast } from "sonner";
-import type { Task } from "@/types";
+import { usePlannerStore } from "@/store/plannerStore";
+import { Input } from "@/components/ui/input";
+
+// Views
+import { DashboardView } from "@/components/views/DashboardView";
+import { CalendarPageView } from "@/components/views/CalendarPageView";
+import { GoalsView } from "@/components/views/GoalsView";
 
 export default function Dashboard() {
   const router = useRouter();
   const [user, setUser] = useState<{ id: string; email?: string; user_metadata?: { full_name?: string } } | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"tasks" | "events">("tasks");
+  const [currentView, setCurrentView] = useState<"dashboard" | "calendar" | "goals">("dashboard");
 
-  // Zustand store selectors
-  const tasks = usePlannerStore(selectTasks);
-  const fixedEvents = usePlannerStore(selectFixedEvents);
-  const scheduleBlocks = usePlannerStore(selectScheduleBlocks);
-  const isLoading = usePlannerStore(selectIsLoading);
-  const isGenerating = usePlannerStore(selectIsGenerating);
-  
   // Zustand store actions
   const fetchAll = usePlannerStore((state) => state.fetchAll);
   const setUserId = usePlannerStore((state) => state.setUserId);
-  const generateSchedule = usePlannerStore((state) => state.generateSchedule);
-  const deleteTask = usePlannerStore((state) => state.deleteTask);
 
   // Auth check and initial data load
   useEffect(() => {
@@ -65,349 +54,118 @@ export default function Dashboard() {
     router.push("/login");
   };
 
-  // Generate schedule handler
-  const handleGenerateSchedule = async () => {
-    const result = await generateSchedule();
-    
-    if (result) {
-      if (result.success) {
-        toast.success(`Planning généré ! ${result.createdBlocks.length} blocs créés.`, {
-          description: "Vos sessions d'étude ont été planifiées automatiquement."
-        });
-      } else {
-        for (const warning of result.warnings) {
-          toast.warning(warning.message, {
-            description: `Tâche: ${warning.taskTitle}`,
-            duration: 5000,
-          });
-        }
-        toast.info(`Planning généré avec ${result.warnings.length} avertissement(s)`);
-      }
-    }
-  };
-
-  // Task deletion handler
-  const handleDeleteTask = async (task: Task, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!confirm(`Supprimer "${task.title}" et tous ses blocs associés ?`)) return;
-    
-    const success = await deleteTask(task.id);
-    if (success) {
-      toast.success("Tâche supprimée");
-    } else {
-      toast.error("Erreur lors de la suppression");
-    }
-  };
-
-  // Refresh data after task creation
-  const handleTaskAdded = useCallback(() => {
-    fetchAll();
-  }, [fetchAll]);
-
-  // Stats calculation
-  const totalHours = tasks.reduce((sum, t) => sum + t.estimated_hours, 0);
-  const upcomingDeadlines = tasks.filter(t => {
-    const deadline = new Date(t.deadline);
-    const now = new Date();
-    const diff = deadline.getTime() - now.getTime();
-    return diff > 0 && diff < 7 * 24 * 60 * 60 * 1000;
-  }).length;
-
   if (initialLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100">
-        <div className="text-center">
-          <div className="relative">
-            <div className="w-16 h-16 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto"></div>
-            <Sparkles className="w-6 h-6 text-indigo-600 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
-          </div>
-          <p className="mt-4 text-slate-600 font-medium">Chargement de votre planning...</p>
-        </div>
+      <div className="flex h-screen items-center justify-center bg-background">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
       </div>
     );
   }
 
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-indigo-50/30">
-      {/* Top Navigation */}
-      <nav className="sticky top-0 z-40 backdrop-blur-xl bg-white/70 border-b border-slate-200/50">
-        <div className="max-w-[1600px] mx-auto px-6 py-4">
-          <div className="flex items-center justify-between">
-            {/* Logo & Brand */}
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/25">
-                <BookOpen className="w-5 h-5 text-white" />
-              </div>
-              <div>
-                <h1 className="text-xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                  StudyPlanner
-                </h1>
-                <p className="text-xs text-slate-500">Planification intelligente</p>
-              </div>
-            </div>
+  // Navigation Items Config
+  const navItems = [
+    { id: 'dashboard', label: 'Tableau de bord', icon: LayoutGrid },
+    { id: 'calendar', label: 'Calendrier', icon: CalendarDays },
+    { id: 'goals', label: 'Objectifs', icon: Target },
+  ] as const;
 
-            {/* User Menu */}
-            <div className="flex items-center gap-4">
-              <div className="hidden sm:flex items-center gap-2 px-4 py-2 rounded-full bg-slate-100/80">
-                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-semibold text-sm">
-                  {(user?.user_metadata?.full_name || user?.email || "U")[0].toUpperCase()}
-                </div>
-                <span className="text-sm font-medium text-slate-700">
-                  {user?.user_metadata?.full_name || user?.email?.split("@")[0]}
-                </span>
-              </div>
-              <Button 
-                variant="ghost" 
-                size="sm"
-                onClick={handleLogout}
-                className="text-slate-500 hover:text-red-600 hover:bg-red-50"
-              >
-                <LogOut className="w-4 h-4" />
-              </Button>
-            </div>
+  return (
+    <div className="flex h-screen w-full bg-slate-50 overflow-hidden">
+
+      {/* Dark Sidebar */}
+      <aside className="w-[280px] bg-sidebar text-sidebar-foreground flex flex-col shadow-xl z-50 flex-none">
+        <div className="h-16 flex items-center px-6 border-b border-sidebar-border/30">
+          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shadow-lg shadow-primary/20 mr-3">
+            <BookOpen className="w-5 h-5 text-white" />
+          </div>
+          <span className="font-bold text-lg tracking-tight">StudyPlanner</span>
+        </div>
+
+        <div className="p-4 space-y-6 flex-1 overflow-y-auto">
+
+          {/* Navigation */}
+          <div className="space-y-1">
+            <p className="px-3 text-xs font-semibold text-sidebar-foreground/50 uppercase tracking-wider mb-2">Menu Principal</p>
+            <nav className="space-y-1">
+              {navItems.map((item) => (
+                <Button
+                  key={item.id}
+                  variant="ghost"
+                  onClick={() => setCurrentView(item.id as any)}
+                  className={`w-full justify-start h-10 rounded-lg transition-all ${currentView === item.id
+                      ? "bg-primary text-white shadow-md shadow-primary/20 font-medium"
+                      : "text-sidebar-foreground hover:bg-white/10 hover:text-white"
+                    }`}
+                >
+                  <item.icon className="w-4 h-4 mr-3" />
+                  {item.label}
+                </Button>
+              ))}
+            </nav>
+          </div>
+
+
+          {/* Promotion / Hint Card */}
+          <div className="bg-gradient-to-br from-slate-800 to-slate-900 rounded-xl p-4 border border-slate-700/50">
+            <h4 className="text-xs font-medium text-blue-200 mb-2 uppercase tracking-wide">Astuce Pro</h4>
+            <p className="text-xs text-slate-300 leading-relaxed">
+              Définissez vos contraintes horaires avant de générer le planning pour éviter les conflits.
+            </p>
           </div>
         </div>
-      </nav>
+
+        {/* User Footer */}
+        <div className="p-4 border-t border-sidebar-border/30 bg-black/10">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-purple-500 to-pink-500 flex items-center justify-center text-white font-bold text-xs shadow-md">
+              {(user?.user_metadata?.full_name || "U")[0].toUpperCase()}
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <p className="text-sm font-medium text-white truncate">{user?.user_metadata?.full_name || "Utilisateur"}</p>
+              <p className="text-xs text-sidebar-foreground/50 truncate">Étudiant</p>
+            </div>
+            <Button variant="ghost" size="icon" onClick={handleLogout} className="h-8 w-8 text-sidebar-foreground/70 hover:text-white hover:bg-white/10">
+              <LogOut className="w-4 h-4" />
+            </Button>
+          </div>
+        </div>
+      </aside>
 
       {/* Main Content */}
-      <main className="max-w-[1600px] mx-auto px-6 py-6">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-          <StatCard icon={<Target className="w-5 h-5" />} label="Examens à préparer" value={tasks.length} color="indigo" />
-          <StatCard icon={<Clock className="w-5 h-5" />} label="Heures à planifier" value={`${totalHours}h`} color="purple" />
-          <StatCard icon={<TrendingUp className="w-5 h-5" />} label="Sessions planifiées" value={scheduleBlocks.length} color="emerald" />
-          <StatCard icon={<CalIcon className="w-5 h-5" />} label="Deadlines cette semaine" value={upcomingDeadlines} color="amber" />
-        </div>
+      <div className="flex-1 flex flex-col min-w-0 h-full">
 
-        {/* Main Grid */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Sidebar */}
-          <aside className="lg:col-span-3 space-y-4">
-            {/* Tab Switcher */}
-            <div className="bg-white rounded-2xl p-1.5 shadow-sm border border-slate-200/50 flex">
-              <button
-                onClick={() => setActiveTab("tasks")}
-                className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium transition-all ${
-                  activeTab === "tasks" ? "bg-indigo-500 text-white shadow-md" : "text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                <BookOpen className="w-4 h-4 inline-block mr-2" />
-                Examens
-              </button>
-              <button
-                onClick={() => setActiveTab("events")}
-                className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-medium transition-all ${
-                  activeTab === "events" ? "bg-indigo-500 text-white shadow-md" : "text-slate-600 hover:bg-slate-50"
-                }`}
-              >
-                <CalendarDays className="w-4 h-4 inline-block mr-2" />
-                Événements
-              </button>
+        {/* Top Header */}
+        <header className="h-16 bg-white border-b border-slate-200 px-6 flex items-center justify-between shadow-sm z-40 flex-none">
+          <div className="flex items-center gap-4 text-sm font-medium text-slate-500">
+            <span className="text-slate-900 font-semibold">{
+              currentView === 'dashboard' ? 'Tableau de bord' :
+                currentView === 'calendar' ? 'Calendrier' : 'Objectifs'
+            }</span>
+            <span className="text-slate-300">/</span>
+            <span>Vue d&apos;ensemble</span>
+          </div>
+
+          <div className="flex items-center gap-4">
+            <div className="relative hidden md:block">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <Input placeholder="Rechercher..." className="w-64 pl-9 h-9 bg-slate-50 border-transparent focus:bg-white focus:border-primary/20 transition-all rounded-lg" />
             </div>
-
-            {/* Tasks Panel */}
-            {activeTab === "tasks" && (
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
-                <div className="p-4 border-b border-slate-100">
-                  <div className="flex items-center justify-between">
-                    <h2 className="font-semibold text-slate-800">Mes Examens</h2>
-                    <span className="text-xs font-medium px-2 py-1 rounded-full bg-indigo-100 text-indigo-600">{tasks.length}</span>
-                  </div>
-                </div>
-                
-                <div className="max-h-[400px] overflow-y-auto">
-                  {tasks.length === 0 ? (
-                    <div className="p-8 text-center">
-                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3">
-                        <BookOpen className="w-6 h-6 text-slate-400" />
-                      </div>
-                      <p className="text-sm text-slate-500">Aucun examen ajouté</p>
-                      <p className="text-xs text-slate-400 mt-1">Commencez par ajouter vos examens</p>
-                    </div>
-                  ) : (
-                    <div className="p-2 space-y-2">
-                      {tasks.map((task) => (
-                        <TaskCard key={task.id} task={task} onDelete={(e) => handleDeleteTask(task, e)} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-                
-                <div className="p-3 border-t border-slate-100 bg-slate-50/50">
-                  <TaskDialog onTaskAdded={handleTaskAdded} />
-                </div>
-              </div>
-            )}
-
-            {/* Events Panel */}
-            {activeTab === "events" && (
-              <div className="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
-                <div className="p-4 border-b border-slate-100">
-                  <div className="flex items-center justify-between">
-                    <h2 className="font-semibold text-slate-800">Événements Fixes</h2>
-                    <span className="text-xs font-medium px-2 py-1 rounded-full bg-slate-100 text-slate-600">{fixedEvents.length}</span>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">Cours, RDV et autres contraintes</p>
-                </div>
-                
-                <div className="max-h-[400px] overflow-y-auto">
-                  {fixedEvents.length === 0 ? (
-                    <div className="p-8 text-center">
-                      <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3">
-                        <CalendarDays className="w-6 h-6 text-slate-400" />
-                      </div>
-                      <p className="text-sm text-slate-500">Aucun événement fixe</p>
-                      <p className="text-xs text-slate-400 mt-1">Ajoutez vos cours récurrents</p>
-                    </div>
-                  ) : (
-                    <div className="p-2 space-y-2">
-                      {fixedEvents.map((event) => (
-                        <FixedEventItem key={event.id} event={event} />
-                      ))}
-                    </div>
-                  )}
-                </div>
-                
-                <div className="p-3 border-t border-slate-100 bg-slate-50/50">
-                  <FixedEventDialog />
-                </div>
-              </div>
-            )}
-
-            {/* Generate Button */}
-            <Button 
-              onClick={handleGenerateSchedule}
-              disabled={isGenerating || tasks.length === 0}
-              className="w-full h-14 rounded-2xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl hover:shadow-indigo-500/30 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                  Génération en cours...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="w-5 h-5 mr-2" />
-                  Générer mon planning
-                </>
-              )}
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-500 hover:text-primary relative">
+              <Bell className="w-5 h-5" />
+              <span className="absolute top-2 right-2.5 w-2 h-2 bg-red-500 rounded-full border-2 border-white"></span>
             </Button>
-          </aside>
-
-          {/* Calendar Area */}
-          <div className="lg:col-span-9">
-            <WarningAlert />
-            <div className="bg-white rounded-2xl shadow-sm border border-slate-200/50 overflow-hidden">
-              <CalendarView tasks={tasks} fixedEvents={fixedEvents} scheduleBlocks={scheduleBlocks} />
-            </div>
+            <Button variant="ghost" size="icon" className="h-9 w-9 text-slate-500 hover:text-primary">
+              <Settings className="w-5 h-5" />
+            </Button>
           </div>
-        </div>
-      </main>
+        </header>
 
-      {/* Loading Overlay */}
-      {isLoading && (
-        <div className="fixed inset-0 bg-white/80 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="text-center">
-            <Loader2 className="w-8 h-8 animate-spin text-indigo-600 mx-auto" />
-            <p className="mt-3 text-slate-600 font-medium">Chargement...</p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ============================================
-// Sub-components
-// ============================================
-
-function StatCard({ icon, label, value, color }: { 
-  icon: React.ReactNode; 
-  label: string; 
-  value: string | number;
-  color: "indigo" | "purple" | "emerald" | "amber";
-}) {
-  const colors = {
-    indigo: "from-indigo-500 to-indigo-600 shadow-indigo-500/20",
-    purple: "from-purple-500 to-purple-600 shadow-purple-500/20",
-    emerald: "from-emerald-500 to-emerald-600 shadow-emerald-500/20",
-    amber: "from-amber-500 to-amber-600 shadow-amber-500/20",
-  };
-
-  return (
-    <div className="bg-white rounded-2xl p-4 shadow-sm border border-slate-200/50 hover:shadow-md transition-shadow">
-      <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${colors[color]} shadow-lg flex items-center justify-center text-white mb-3`}>
-        {icon}
-      </div>
-      <p className="text-2xl font-bold text-slate-800">{value}</p>
-      <p className="text-xs text-slate-500 mt-0.5">{label}</p>
-    </div>
-  );
-}
-
-function TaskCard({ task, onDelete }: { task: Task; onDelete: (e: React.MouseEvent) => void }) {
-  const deadline = new Date(task.deadline);
-  const now = new Date();
-  const daysLeft = Math.ceil((deadline.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-  const isUrgent = daysLeft <= 3 && daysLeft > 0;
-  const isPast = daysLeft < 0;
-
-  return (
-    <div className={`p-3 rounded-xl border transition-all hover:shadow-md cursor-pointer group ${
-      isPast ? "bg-red-50 border-red-200" :
-      isUrgent ? "bg-amber-50 border-amber-200" :
-      "bg-slate-50 border-slate-200 hover:border-indigo-200 hover:bg-indigo-50/50"
-    }`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <h3 className="font-medium text-slate-800 truncate">{task.title}</h3>
-          <div className="flex items-center gap-3 mt-2">
-            <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-              isPast ? "bg-red-100 text-red-700" :
-              isUrgent ? "bg-amber-100 text-amber-700" :
-              "bg-indigo-100 text-indigo-700"
-            }`}>
-              {isPast ? "Passé" : isUrgent ? `${daysLeft}j restants` : deadline.toLocaleDateString("fr-FR", { day: "numeric", month: "short" })}
-            </span>
-            <span className="text-xs text-slate-500 flex items-center gap-1">
-              <Clock className="w-3 h-3" />
-              {task.estimated_hours}h
-            </span>
-          </div>
-        </div>
-        <div className="flex gap-1">
-          <TaskDialog 
-            taskToEdit={task}
-            trigger={
-              <Button
-                variant="ghost"
-                size="sm"
-                className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-all"
-              >
-                <Pencil className="w-4 h-4" />
-              </Button>
-            }
-          />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={onDelete}
-            className="opacity-0 group-hover:opacity-100 h-8 w-8 p-0 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all"
-          >
-            <Trash2 className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-      
-      {/* Progress indicator */}
-      <div className="mt-3 flex items-center gap-2">
-        <div className="flex-1 h-1.5 bg-slate-200 rounded-full overflow-hidden">
-          <div 
-            className={`h-full rounded-full transition-all ${isPast ? "bg-red-500" : isUrgent ? "bg-amber-500" : "bg-indigo-500"}`}
-            style={{ width: `${Math.min(100, (task.difficulty / 5) * 100)}%` }}
-          />
-        </div>
-        <span className="text-[10px] text-slate-400 font-medium">Diff. {task.difficulty}/5</span>
+        {/* View Content Container */}
+        <main className="flex-1 overflow-hidden relative">
+          {currentView === 'dashboard' && <DashboardView />}
+          {currentView === 'calendar' && <CalendarPageView />}
+          {currentView === 'goals' && <GoalsView />}
+        </main>
       </div>
     </div>
   );

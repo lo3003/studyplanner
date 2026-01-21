@@ -24,9 +24,10 @@ import type { FixedEvent, CreateFixedEventInput } from "@/types";
 interface FixedEventDialogProps {
   event?: FixedEvent; // If provided, we're in edit mode
   onClose?: () => void;
+  trigger?: React.ReactNode;
 }
 
-export function FixedEventDialog({ event, onClose }: FixedEventDialogProps) {
+export function FixedEventDialog({ event, onClose, trigger }: FixedEventDialogProps) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
@@ -94,16 +95,20 @@ export function FixedEventDialog({ event, onClose }: FixedEventDialogProps) {
     }
   };
 
+  const defaultTrigger = (
+    <Button
+      variant="outline"
+      className="w-full gap-2 rounded-xl border-dashed border-2 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50 text-slate-600 hover:text-indigo-600 transition-all"
+    >
+      <Plus className="h-4 w-4" />
+      Ajouter un événement fixe
+    </Button>
+  );
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogTrigger asChild>
-        <Button 
-          variant="outline" 
-          className="w-full gap-2 rounded-xl border-dashed border-2 border-slate-300 hover:border-indigo-400 hover:bg-indigo-50/50 text-slate-600 hover:text-indigo-600 transition-all"
-        >
-          <Plus className="h-4 w-4" />
-          Ajouter un événement fixe
-        </Button>
+        {trigger || defaultTrigger}
       </DialogTrigger>
       <DialogContent className="sm:max-w-[425px] rounded-2xl">
         <DialogHeader>
@@ -175,8 +180,8 @@ export function FixedEventDialog({ event, onClose }: FixedEventDialogProps) {
           </div>
 
           <DialogFooter className="mt-2">
-            <Button 
-              type="submit" 
+            <Button
+              type="submit"
               disabled={loading}
               className="rounded-xl bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 shadow-md"
             >
@@ -206,7 +211,7 @@ export function FixedEventItem({ event }: FixedEventItemProps) {
 
     setDeleting(true);
     const success = await deleteFixedEvent(event.id);
-    
+
     if (success) {
       toast.success("Événement supprimé");
     } else {

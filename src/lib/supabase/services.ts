@@ -307,6 +307,23 @@ export async function deleteScheduleBlock(id: string): Promise<ApiResponse<null>
   };
 }
 
+export async function deleteAllScheduleBlocks(): Promise<ApiResponse<null>> {
+  const userId = await getCurrentUserId();
+  if (!userId) {
+    return { data: null, error: 'User not authenticated' };
+  }
+
+  const { error } = await supabase
+    .from('schedule_blocks')
+    .delete()
+    .eq('user_id', userId);
+
+  return {
+    data: null,
+    error: error?.message ?? null,
+  };
+}
+
 export async function deleteFutureUnlockedBlocks(): Promise<ApiResponse<null>> {
   const userId = await getCurrentUserId();
   if (!userId) {
